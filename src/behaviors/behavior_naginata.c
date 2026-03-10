@@ -67,6 +67,7 @@ extern int64_t timestamp;
 static NGListArray nginput;
 static uint32_t pressed_keys = 0UL; // 押しているキーのビットをたてる
 static int8_t n_pressed_keys = 0;   // 押しているキーの数
+static int8_t active_modifiers = 0; // 押下中の修飾キー数
 
 #define NG_WINDOWS 0
 #define NG_MACOS 1
@@ -435,6 +436,62 @@ int number_of_candidates(NGList *keys) {
   return result;
 }
 
+static bool is_naginata_target_keycode(uint32_t keycode) {
+    switch (keycode) {
+    case A ... Z:
+    case SPACE:
+    case ENTER:
+    case DOT:
+    case COMMA:
+    case SLASH:
+    case SEMI:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_modifier_keycode(uint32_t keycode) {
+    switch (keycode) {
+    case LSHIFT:
+    case RSHIFT:
+    case LCTRL:
+    case RCTRL:
+    case LALT:
+    case RALT:
+    case LGUI:
+    case RGUI:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_layer_control_keycode(uint32_t keycode) {
+    // one_param の &ng では MO/LT/TO/TG などのレイヤー制御が同じキーコード経路に入る場合がある。
+    // ここでは薙刀対象でも修飾でもないキーをレイヤー制御/制御キーとして先に透過する。
+    return !is_naginata_target_keycode(keycode) && !is_modifier_keycode(keycode);
+}
+
+static void cancel_naginata_buffer(void) {
+    initializeListArray(&nginput);
+    pressed_keys = 0UL;
+    n_pressed_keys = 0;
+}
+
+static void commit_naginata_buffer(void) {
+    while (nginput.size > 0) {
+        ng_type(&(nginput.elements[0]));
+        removeFromListArrayAt(&nginput, 0);
+    }
+    pressed_keys = 0UL;
+    n_pressed_keys = 0;
+}
+
+static inline void passthrough_keycode(uint32_t keycode, bool pressed) {
+    raise_zmk_keycode_state_changed_from_encoded(keycode, pressed, timestamp);
+}
+
 // キー入力を文字に変換して出力する
 void ng_type(NGList *keys) {
     LOG_DBG(">NAGINATA NG_TYPE");
@@ -494,6 +551,34 @@ bool naginata_press(struct zmk_behavior_binding *binding, struct zmk_behavior_bi
     LOG_DBG(">NAGINATA PRESS");
 
     uint32_t keycode = binding->param1;
+
+    // 判定順(Method A):
+    // 1) レイヤー制御(MO/LT/TO/TG等)を最優先で透過（バッファは commit）
+    // 2) 修飾キーを透過（ショートカット優先のためバッファは cancel）
+    // 3) 薙刀対象キー
+    if (is_layer_control_keycode(keycode)) {
+        if (nginput.size > 0) {
+            commit_naginata_buffer();
+        }
+        passthrough_keycode(keycode, true);
+        LOG_DBG("<NAGINATA PRESS (layer/control passthrough)");
+        return true;
+    }
+
+    if (is_modifier_keycode(keycode)) {
+        active_modifiers++;
+        cancel_naginata_buffer();
+        passthrough_keycode(keycode, true);
+        LOG_DBG("<NAGINATA PRESS (modifier passthrough)");
+        return true;
+    }
+
+    if (active_modifiers > 0) {
+        // Cmd/Shift/Ctrl/Alt 押下中は薙刀変換を止めてショートカットを優先。
+        passthrough_keycode(keycode, true);
+        LOG_DBG("<NAGINATA PRESS (shortcut passthrough)");
+        return true;
+    }
 
     switch (keycode) {
     case A ... Z:
@@ -587,6 +672,27 @@ bool naginata_release(struct zmk_behavior_binding *binding,
 
     uint32_t keycode = binding->param1;
 
+    if (is_layer_control_keycode(keycode)) {
+        passthrough_keycode(keycode, false);
+        LOG_DBG("<NAGINATA RELEASE (layer/control passthrough)");
+        return true;
+    }
+
+    if (is_modifier_keycode(keycode)) {
+        if (active_modifiers > 0) {
+            active_modifiers--;
+        }
+        passthrough_keycode(keycode, false);
+        LOG_DBG("<NAGINATA RELEASE (modifier passthrough)");
+        return true;
+    }
+
+    if (active_modifiers > 0) {
+        passthrough_keycode(keycode, false);
+        LOG_DBG("<NAGINATA RELEASE (shortcut passthrough)");
+        return true;
+    }
+
     switch (keycode) {
     case A ... Z:
     case SPACE:
@@ -629,6 +735,7 @@ static int behavior_naginata_init(const struct device *dev) {
     initializeListArray(&nginput);
     pressed_keys = 0UL;
     n_pressed_keys = 0;
+    active_modifiers = 0;
     naginata_config.os =  NG_MACOS;
 
     return 0;
