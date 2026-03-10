@@ -1,4 +1,4 @@
-# S2/S5 修正レポート（zmk-naginata 本体 / v16方針ベース）
+# S2/S5 修正レポート（zmk-naginata 本体 / v16ベース）
 
 ## 変更要点
 
