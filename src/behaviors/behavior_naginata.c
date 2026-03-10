@@ -68,6 +68,7 @@ static NGListArray nginput;
 static uint32_t pressed_keys = 0UL; // 押しているキーのビットをたてる
 static int8_t n_pressed_keys = 0;   // 押しているキーの数
 static int8_t active_modifiers = 0; // 押下中の修飾キー数
+static int8_t external_modifiers = 0; // 他behaviorから来る修飾キー押下数
 
 #define NG_WINDOWS 0
 #define NG_MACOS 1
@@ -467,6 +468,8 @@ static bool is_modifier_keycode(uint32_t keycode) {
     }
 }
 
+static inline int8_t total_active_modifiers(void) { return active_modifiers + external_modifiers; }
+
 static bool is_layer_control_keycode(uint32_t keycode) {
     // one_param の &ng では MO/LT/TO/TG などのレイヤー制御が同じキーコード経路に入る場合がある。
     // ここでは薙刀対象でも修飾でもないキーをレイヤー制御/制御キーとして先に透過する。
@@ -573,7 +576,7 @@ bool naginata_press(struct zmk_behavior_binding *binding, struct zmk_behavior_bi
         return true;
     }
 
-    if (active_modifiers > 0) {
+    if (total_active_modifiers() > 0) {
         // Cmd/Shift/Ctrl/Alt 押下中は薙刀変換を止めてショートカットを優先。
         passthrough_keycode(keycode, true);
         LOG_DBG("<NAGINATA PRESS (shortcut passthrough)");
@@ -687,7 +690,7 @@ bool naginata_release(struct zmk_behavior_binding *binding,
         return true;
     }
 
-    if (active_modifiers > 0) {
+    if (total_active_modifiers() > 0) {
         passthrough_keycode(keycode, false);
         LOG_DBG("<NAGINATA RELEASE (shortcut passthrough)");
         return true;
@@ -736,6 +739,7 @@ static int behavior_naginata_init(const struct device *dev) {
     pressed_keys = 0UL;
     n_pressed_keys = 0;
     active_modifiers = 0;
+    external_modifiers = 0;
     naginata_config.os =  NG_MACOS;
 
     return 0;
@@ -779,6 +783,25 @@ static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
 
     return ZMK_BEHAVIOR_OPAQUE;
 }
+
+static int on_keycode_state_changed(const zmk_event_t *eh) {
+    const struct zmk_keycode_state_changed *ev = as_zmk_keycode_state_changed(eh);
+
+    if (ev == NULL || !is_modifier_keycode(ev->keycode)) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    if (ev->state) {
+        external_modifiers++;
+    } else if (external_modifiers > 0) {
+        external_modifiers--;
+    }
+
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(behavior_naginata_keycode_state, on_keycode_state_changed);
+ZMK_SUBSCRIPTION(behavior_naginata_keycode_state, zmk_keycode_state_changed);
 
 static const struct behavior_driver_api behavior_naginata_driver_api = {
     .binding_pressed = on_keymap_binding_pressed, .binding_released = on_keymap_binding_released};
