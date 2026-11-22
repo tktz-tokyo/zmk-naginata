@@ -728,8 +728,38 @@ static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
+/*
+ * Tell ZMK Studio that &ng's argument is a HID usage, just like &kp.
+ * Without this metadata Studio renders the raw number (e.g. 458859).
+ * The original press/release behavior remains untouched, preserving
+ * simultaneous Naginata key processing and thumb holds.
+ */
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+static const struct behavior_parameter_value_metadata ng_param_values[] = {
+    {
+        .display_name = "Key",
+        .type = BEHAVIOR_PARAMETER_VALUE_TYPE_HID_USAGE,
+    },
+};
+
+static const struct behavior_parameter_metadata_set ng_param_sets[] = {{
+    .param1_values = ng_param_values,
+    .param1_values_len = ARRAY_SIZE(ng_param_values),
+}};
+
+static const struct behavior_parameter_metadata ng_param_metadata = {
+    .sets_len = ARRAY_SIZE(ng_param_sets),
+    .sets = ng_param_sets,
+};
+#endif
+
 static const struct behavior_driver_api behavior_naginata_driver_api = {
-    .binding_pressed = on_keymap_binding_pressed, .binding_released = on_keymap_binding_released};
+    .binding_pressed = on_keymap_binding_pressed,
+    .binding_released = on_keymap_binding_released,
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+    .parameter_metadata = &ng_param_metadata,
+#endif
+};
 
 #define KP_INST(n)                                                                                 \
     BEHAVIOR_DT_INST_DEFINE(n, behavior_naginata_init, NULL, NULL, NULL, POST_KERNEL,              \
