@@ -14,6 +14,15 @@
 #include <zmk/events/keycode_state_changed.h>
 #include <zmk/behavior.h>
 
+/*
+ * Sync punctuation mode with cormoran's DYA Studio host-OS detection.
+ * The effective OS includes the persisted per-BLE-profile Studio override.
+ * Do not use fixed Bluetooth slot numbers: hosts can be re-paired.
+ */
+#if IS_ENABLED(CONFIG_ZMK_OS_DETECTION)
+#include <cormoran/os-detection/os_detection.h>
+#endif
+
 #include <zmk_naginata/nglist.h>
 #include <zmk_naginata/nglistarray.h>
 #include <zmk_naginata/naginata_func.h>
@@ -80,6 +89,45 @@ typedef union {
 
 extern user_config_t naginata_config;
 
+#if IS_ENABLED(CONFIG_ZMK_OS_DETECTION)
+static void naginata_sync_host_os(void) {
+    switch (zmk_os_detection_current()) {
+    case ZMK_OS_IOS:
+        naginata_config.os = NG_IOS;
+        break;
+    case ZMK_OS_WINDOWS:
+        naginata_config.os = NG_WINDOWS;
+        break;
+    case ZMK_OS_LINUX:
+        naginata_config.os = NG_LINUX;
+        break;
+    case ZMK_OS_MACOS:
+        naginata_config.os = NG_MACOS;
+        break;
+    case ZMK_OS_ANDROID:
+        /* Android has no Unicode Hex Input equivalent; use HID symbols. */
+        naginata_config.os = NG_IOS;
+        break;
+    case ZMK_OS_UNKNOWN:
+    default:
+        /* Preserve a manual setting until detection or Studio override exists. */
+        break;
+    }
+}
+
+static int naginata_host_os_listener(const zmk_event_t *eh) {
+    if (as_zmk_os_changed(eh)) {
+        naginata_sync_host_os();
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(naginata_host_os, naginata_host_os_listener);
+ZMK_SUBSCRIPTION(naginata_host_os, zmk_os_changed);
+#else
+static void naginata_sync_host_os(void) {}
+#endif
+
 static const uint32_t ng_key[] = {
     [A - A] = B_A,     [B - A] = B_B,         [C - A] = B_C,         [D - A] = B_D,
     [E - A] = B_E,     [F - A] = B_F,         [G - A] = B_G,         [H - A] = B_H,
@@ -123,8 +171,8 @@ static naginata_kanamap ngdickana[] = {
     {.shift = NONE    , .douji = B_D            , .kana = {T, O, NONE, NONE, NONE, NONE   }, .func = nofunc }, // と
     {.shift = NONE    , .douji = B_M            , .kana = {N, A, NONE, NONE, NONE, NONE   }, .func = nofunc }, // な
     {.shift = B_SPACE , .douji = B_D            , .kana = {N, I, NONE, NONE, NONE, NONE   }, .func = nofunc }, // に
-    {.shift = B_SPACE , .douji = B_B            , .kana = {N, U, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ぬ
-    {.shift = B_SPACE , .douji = B_R            , .kana = {N, E, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ね
+    {.shift = B_SPACE , .douji = B_W            , .kana = {N, U, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ぬ
+    {.shift = B_SPACE , .douji = B_COMMA        , .kana = {N, E, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ね
     {.shift = B_SPACE , .douji = B_J            , .kana = {N, O, NONE, NONE, NONE, NONE   }, .func = nofunc }, // の
     {.shift = NONE    , .douji = B_C            , .kana = {H, A, NONE, NONE, NONE, NONE   }, .func = nofunc }, // は
     {.shift = NONE    , .douji = B_X            , .kana = {H, I, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ひ
@@ -135,8 +183,8 @@ static naginata_kanamap ngdickana[] = {
     {.shift = B_SPACE , .douji = B_Z            , .kana = {H, O, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ほ
     {.shift = B_SPACE , .douji = B_F            , .kana = {M, A, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ま
     {.shift = B_SPACE , .douji = B_S            , .kana = {M, I, NONE, NONE, NONE, NONE   }, .func = nofunc }, // み
-    {.shift = B_SPACE , .douji = B_COMMA        , .kana = {M, U, NONE, NONE, NONE, NONE   }, .func = nofunc }, // む
-    {.shift = B_SPACE , .douji = B_W            , .kana = {M, E, NONE, NONE, NONE, NONE   }, .func = nofunc }, // め
+    {.shift = B_SPACE , .douji = B_B            , .kana = {M, U, NONE, NONE, NONE, NONE   }, .func = nofunc }, // む
+    {.shift = B_SPACE , .douji = B_R            , .kana = {M, E, NONE, NONE, NONE, NONE   }, .func = nofunc }, // め
     {.shift = B_SPACE , .douji = B_K            , .kana = {M, O, NONE, NONE, NONE, NONE   }, .func = nofunc }, // も
     {.shift = B_SPACE , .douji = B_H            , .kana = {Y, A, NONE, NONE, NONE, NONE   }, .func = nofunc }, // や
     {.shift = B_SPACE , .douji = B_P            , .kana = {Y, U, NONE, NONE, NONE, NONE   }, .func = nofunc }, // ゆ
@@ -638,6 +686,9 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d keycode 0x%02X", event.position, binding->param1);
 
+    /* Also sync on keypress: catches an OS override restored before init. */
+    naginata_sync_host_os();
+
     // F15が押されたらnaginata_config.os=NG_WINDOWS
     switch (binding->param1) {
         case F15:
@@ -648,6 +699,10 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
             return ZMK_BEHAVIOR_OPAQUE;
         case F17:
             naginata_config.os = NG_LINUX;
+            return ZMK_BEHAVIOR_OPAQUE;
+        case F20:
+            /* Use ordinary HID punctuation on iPhone/iPadOS. */
+            naginata_config.os = NG_IOS;
             return ZMK_BEHAVIOR_OPAQUE;
         case F18:
             naginata_config.tategaki = true;
@@ -673,8 +728,38 @@ static int on_keymap_binding_released(struct zmk_behavior_binding *binding,
     return ZMK_BEHAVIOR_OPAQUE;
 }
 
+/*
+ * Tell ZMK Studio that &ng's argument is a HID usage, just like &kp.
+ * Without this metadata Studio renders the raw number (e.g. 458859).
+ * The original press/release behavior remains untouched, preserving
+ * simultaneous Naginata key processing and thumb holds.
+ */
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+static const struct behavior_parameter_value_metadata ng_param_values[] = {
+    {
+        .display_name = "Key",
+        .type = BEHAVIOR_PARAMETER_VALUE_TYPE_HID_USAGE,
+    },
+};
+
+static const struct behavior_parameter_metadata_set ng_param_sets[] = {{
+    .param1_values = ng_param_values,
+    .param1_values_len = ARRAY_SIZE(ng_param_values),
+}};
+
+static const struct behavior_parameter_metadata ng_param_metadata = {
+    .sets_len = ARRAY_SIZE(ng_param_sets),
+    .sets = ng_param_sets,
+};
+#endif
+
 static const struct behavior_driver_api behavior_naginata_driver_api = {
-    .binding_pressed = on_keymap_binding_pressed, .binding_released = on_keymap_binding_released};
+    .binding_pressed = on_keymap_binding_pressed,
+    .binding_released = on_keymap_binding_released,
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+    .parameter_metadata = &ng_param_metadata,
+#endif
+};
 
 #define KP_INST(n)                                                                                 \
     BEHAVIOR_DT_INST_DEFINE(n, behavior_naginata_init, NULL, NULL, NULL, POST_KERNEL,              \

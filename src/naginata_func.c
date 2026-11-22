@@ -136,6 +136,10 @@ void input_unicode_hex(int n1, int n2, int n3, int n4) {
             release_compose_key();
             return_to_kana_input();
             return;
+        case NG_IOS:
+            /* No generic Unicode Hex Input on iOS. Never emit raw hex digits
+             * that would appear as garbled text in the active IME. */
+            return;
         case NG_WINDOWS:
         case NG_LINUX:
             press_compose_key();
@@ -157,6 +161,25 @@ void input_unicode_hex(int n1, int n2, int n3, int n4) {
             return_to_kana_input();
             return;
     }
+}
+
+/*
+ * iOS/iPadOS hardware keyboards cannot use macOS Unicode Hex Input.
+ * Prefer ordinary HID keys interpreted by the active Japanese Romaji IME.
+ * Exact results depend on the host's JIS/ANSI hardware keyboard layout.
+ * Keep the original Unicode path unchanged for macOS/Windows/Linux.
+ */
+static void ios_tap_key(uint32_t keycode) {
+    raise_zmk_keycode_state_changed_from_encoded(keycode, true, timestamp);
+    raise_zmk_keycode_state_changed_from_encoded(keycode, false, timestamp);
+}
+
+static void input_unicode_or_ime(int n1, int n2, int n3, int n4, uint32_t ios_keycode) {
+    if (naginata_config.os == NG_IOS) {
+        ios_tap_key(ios_keycode);
+        return;
+    }
+    input_unicode_hex(n1, n2, n3, n4);
 }
 
 void ng_T() { ng_left(1); }
@@ -217,11 +240,11 @@ void ngh_JKD() { // ？{改行}
 }
 
 void ngh_JKF() { // 「{改行}
-    input_unicode_hex(N3, N0, N0, C);
+    input_unicode_or_ime(N3, N0, N0, C, LEFT_BRACKET);
 }
 
 void ngh_JKG() { // ({改行}
-    input_unicode_hex(F, F, N0, N8);
+    input_unicode_or_ime(F, F, N0, N8, LS(N9));
 }
 
 void ngh_JKZ() { // ――{改行}
@@ -241,11 +264,11 @@ void ngh_JKC() { // ！{改行}
 }
 
 void ngh_JKV() { // 」{改行}
-    input_unicode_hex(N3, N0, N0, D);
+    input_unicode_or_ime(N3, N0, N0, D, RIGHT_BRACKET);
 }
 
 void ngh_JKB() { // ){改行}
-    input_unicode_hex(F, F, N0, N9);
+    input_unicode_or_ime(F, F, N0, N9, LS(N0));
 }
 
 void ngh_DFY() { // {Home}
@@ -438,20 +461,20 @@ void ngh_MCX() { // 】{改行}
 }
 
 void ngh_MCC() { // 」{改行}{改行}
-    input_unicode_hex(N3, N0, N0, D);
+    input_unicode_or_ime(N3, N0, N0, D, RIGHT_BRACKET);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, true, timestamp);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, false, timestamp);
 }
 
 void ngh_MCV() { // 」{改行}{改行}「{改行}
-    input_unicode_hex(N3, N0, N0, D);
+    input_unicode_or_ime(N3, N0, N0, D, RIGHT_BRACKET);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, true, timestamp);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, false, timestamp);
-    input_unicode_hex(N3, N0, N0, C);
+    input_unicode_or_ime(N3, N0, N0, C, LEFT_BRACKET);
 }
 
 void ngh_MCB() { // 」{改行}{改行}{Space}
-    input_unicode_hex(N3, N0, N0, D);
+    input_unicode_or_ime(N3, N0, N0, D, RIGHT_BRACKET);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, true, timestamp);
     raise_zmk_keycode_state_changed_from_encoded(ENTER, false, timestamp);
     raise_zmk_keycode_state_changed_from_encoded(SPACE, true, timestamp);
