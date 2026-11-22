@@ -14,6 +14,17 @@
 #include <zmk/events/keycode_state_changed.h>
 #include <zmk/behavior.h>
 
+/*
+ * AeroGU34: choose punctuation encoding from the selected BLE profile.
+ * ZMK profile indices are zero-based; Settings BT_SEL slots are 1-based.
+ * Keep this disabled for non-central split halves and non-BLE keyboards.
+ */
+#if IS_ENABLED(CONFIG_ZMK_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+#include <zmk/ble.h>
+#include <zmk/endpoints.h>
+#include <zmk/events/ble_active_profile_changed.h>
+#endif
+
 #include <zmk_naginata/nglist.h>
 #include <zmk_naginata/nglistarray.h>
 #include <zmk_naginata/naginata_func.h>
@@ -79,6 +90,36 @@ typedef union {
 } user_config_t;
 
 extern user_config_t naginata_config;
+
+#if IS_ENABLED(CONFIG_ZMK_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+/* BT1 Mac, BT2 iPhone, BT3 MacBook Pro, BT4 iPad, BT5 Mac. */
+static void naginata_sync_ble_os(void) {
+    struct zmk_endpoint_instance endpoint = zmk_endpoint_get_selected();
+    if (endpoint.transport != ZMK_TRANSPORT_BLE) {
+        return; /* Leave manual OS selection intact for a USB host. */
+    }
+
+    int profile = zmk_ble_active_profile_index();
+    if (profile < 0 || profile >= ZMK_BLE_PROFILE_COUNT) {
+        return;
+    }
+    naginata_config.os = (profile == 1 || profile == 3) ? NG_IOS : NG_MACOS;
+}
+
+static int naginata_ble_profile_listener(const zmk_event_t *eh) {
+    const struct zmk_ble_active_profile_changed *event =
+        as_zmk_ble_active_profile_changed(eh);
+    if (event) {
+        naginata_sync_ble_os();
+    }
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(naginata_ble_profile, naginata_ble_profile_listener);
+ZMK_SUBSCRIPTION(naginata_ble_profile, zmk_ble_active_profile_changed);
+#else
+static void naginata_sync_ble_os(void) {}
+#endif
 
 static const uint32_t ng_key[] = {
     [A - A] = B_A,     [B - A] = B_B,         [C - A] = B_C,         [D - A] = B_D,
@@ -637,6 +678,10 @@ static int behavior_naginata_init(const struct device *dev) {
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
     LOG_DBG("position %d keycode 0x%02X", event.position, binding->param1);
+
+    /* Also sync on keypress: works after reboot even if profile selection
+     * happened before the Naginata behavior was initialized. */
+    naginata_sync_ble_os();
 
     // F15が押されたらnaginata_config.os=NG_WINDOWS
     switch (binding->param1) {
