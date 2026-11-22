@@ -649,6 +649,10 @@ static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
         case F17:
             naginata_config.os = NG_LINUX;
             return ZMK_BEHAVIOR_OPAQUE;
+        case F20:
+            /* Use ordinary HID punctuation on iPhone/iPadOS. */
+            naginata_config.os = NG_IOS;
+            return ZMK_BEHAVIOR_OPAQUE;
         case F18:
             naginata_config.tategaki = true;
             return ZMK_BEHAVIOR_OPAQUE;
